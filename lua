@@ -9,10 +9,29 @@ local WEBHOOK_URL = "https://discord.com/api/webhooks/1552377913238622251/kKXh-i
 local PLAYER = game.Players.LocalPlayer
 local PLAYER_NAME = PLAYER.Name
 
--- 1. Helper: Get Account Age (Fixed)
+-- 1. Helper: Get Account Age (Robust)
 local function getAccountAge()
-    local created = PLAYER.Created
-    local createdUnix = created.UnixTimestamp
+    local createdDate = nil
+    
+    -- Try to get the Created property
+    pcall(function()
+        createdDate = PLAYER.Created
+    end)
+    
+    if not createdDate then
+        return "Unknown"
+    end
+    
+    -- Convert DateTime to Unix Timestamp
+    local createdUnix
+    pcall(function()
+        createdUnix = createdDate.UnixTimestamp
+    end)
+    
+    if not createdUnix then
+        return "Unknown"
+    end
+    
     local now = os.time()
     local seconds = now - createdUnix
     local days = math.floor(seconds / 86400)
