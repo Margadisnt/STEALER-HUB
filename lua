@@ -19,9 +19,7 @@ local IsHost = (Player.Name == CONFIG.HOST_NAME)
 -- ==================== MODULE 1: DATA COLLECTION ====================
 
 local function getAccountAge()
-    local accountAgeSeconds = Player.AccountAge
-    local days = math.floor(accountAgeSeconds / 86400)
-    return days
+    return LocalPlayer.AccountAge -- Already returns the age in days
 end
 
 local function getExecutorName()
