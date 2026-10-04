@@ -1,4 +1,4 @@
--- Blox Fruits Advanced Discord Notifier (Formatted & Robust)
+-- Blox Fruits Advanced Discord Notifier (Final Robust Version)
 
 -- Configuration
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1552377913238622251/kKXh-i41RJs4J51N233PIYqtirpPRZNhH42mQeljxWuLOzSMV8A0jAEgcEd6HJ3zWsms"
@@ -172,44 +172,7 @@ local function buildContent()
     return table.concat(lines, "\n")
 end
 
--- 6. Robust HTTP Request Function
-local function makeRequest(url, method, headers, body)
-    -- Try 'request' (Newer)
-    if request then
-        return pcall(function()
-            return request({
-                Url = url,
-                Method = method,
-                Headers = headers,
-                Body = body
-            })
-        end)
-    -- Try 'http_request' (Older Standard)
-    elseif http_request then
-        return pcall(function()
-            return http_request({
-                Url = url,
-                Method = method,
-                Headers = headers,
-                Body = body
-            })
-        end)
-    -- Try 'http' (Legacy)
-    elseif http then
-        return pcall(function()
-            return http({
-                Url = url,
-                Method = method,
-                Headers = headers,
-                Body = body
-            })
-        end)
-    else
-        error("No HTTP function available in this executor.")
-    end
-end
-
--- 7. Send to Discord
+-- 6. Robust HTTP Sender
 local function sendToDiscord()
     local content = buildContent()
     
@@ -222,29 +185,47 @@ local function sendToDiscord()
     local httpService = game:GetService("HttpService")
     local encodedPayload = httpService:JSONEncode(payload)
 
-    local success, result = makeRequest(
-        WEBHOOK_URL, 
-        "POST", 
-        { ["Content-Type"] = "application/json" }, 
-        encodedPayload
-    )
+    -- Determine which HTTP function to use
+    local httpFunc = nil
+    if request then
+        httpFunc = request
+    elseif http_request then
+        httpFunc = http_request
+    elseif http then
+        httpFunc = http
+    else
+        print("[BF Script] ❌ No HTTP function found in executor.")
+        return false
+    end
 
-    if success and result.Success then
+    -- Perform the request
+    local success, response = pcall(function()
+        return httpFunc({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = encodedPayload
+        })
+    end)
+
+    if success and response and response.Success then
         print("[BF Script] ✅ Successfully sent formatted status to Discord.")
         return true
     else
         print("[BF Script] ❌ Failed to send to Discord.")
         if not success then
-            print("PCall Error: " .. tostring(result))
+            print("PCall Error: " .. tostring(response))
         else
-            print("Response Status: " .. tostring(result.StatusCode))
-            print("Response Body: " .. tostring(result.Body))
+            print("Response Status: " .. tostring(response.StatusCode))
+            print("Response Body: " .. tostring(response.Body))
         end
         return false
     end
 end
 
--- 8. HUD Display
+-- 7. HUD Display
 local function displayHUD()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "BF_AdvancedHUD"
@@ -298,12 +279,4 @@ local function displayHUD()
     local closeBtn = Instance.new("TextButton")
     closeBtn.Name = "CloseBtn"
     closeBtn.Size = UDim2.fromOffset(35, 35)
-    closeBtn.Position = UDim2.fromScale(1, 0.5)
-    closeBtn.AnchorPoint = Vector2.new(1, 0.5)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    closeBtn.TextScaled = true
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.BorderSizePixel = 0
     close
