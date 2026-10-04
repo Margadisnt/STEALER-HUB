@@ -1,9 +1,27 @@
--- Blox Fruits Username Discord Webhook Script
+-- Blox Fruits Username Discord Webhook Script (Fixed)
 
 -- Configuration
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1552377913238622251/kKXh-i41RJs4J51N233PIYqtirpPRZNhH42mQeljxWuLOzSMV8A0jAEgcEd6HJ3zWsms"
 local PLAYER_NAME = game.Players.LocalPlayer.Name
-local SERVER_ID = workspace:GetServerId() -- Get current server ID for context
+
+-- Get Server ID safely
+local function getServerId()
+    -- Method 1: RunService (Most compatible)
+    if pcall(function()
+        return game:GetService("RunService"):GetServerId()
+    end) then
+        return game:GetService("RunService"):GetServerId()
+    -- Method 2: game:GetServerId (Newer Roblox API)
+    elseif pcall(function()
+        return game:GetServerId()
+    end) then
+        return game:GetServerId()
+    else
+        return "Unknown"
+    end
+end
+
+local SERVER_ID = getServerId()
 
 -- 1. Send to Discord Webhook
 local function sendToDiscord()
