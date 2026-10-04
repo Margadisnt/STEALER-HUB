@@ -149,7 +149,7 @@ local function buildPayload()
                 color = 5793266,
                 fields = fields,
                 footer = {
-                    text = "Blox Fruits Auto-Notifier | " .. os.date("%H:%M:%S")
+                    text = "Blox Fruits AutoPZDAPZDA-Notifier | " .. os.date("%H:%M:%S")
                 },
                 timestamp = os.date("!")
             }
