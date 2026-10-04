@@ -1,6 +1,10 @@
 -- Blox Fruits Advanced Discord Notifier (Final Robust Version)
 
--- Configuration
+-- Ensure we are in the correct environment
+if not game or not game.Players then
+    error("Roblox environment not detected. Check your executor.")
+end
+
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1552377913238622251/kKXh-i41RJs4J51N233PIYqtirpPRZNhH42mQeljxWuLOzSMV8A0jAEgcEd6HJ3zWsms"
 local PLAYER = game.Players.LocalPlayer
 local PLAYER_NAME = PLAYER.Name
@@ -187,14 +191,14 @@ local function sendToDiscord()
 
     -- Determine which HTTP function to use
     local httpFunc = nil
-    if request then
+    if type(request) == "function" then
         httpFunc = request
-    elseif http_request then
+    elseif type(http_request) == "function" then
         httpFunc = http_request
-    elseif http then
+    elseif type(http) == "function" then
         httpFunc = http
     else
-        print("[BF Script] ❌ No HTTP function found in executor.")
+        print("[BF Script] ❌ No HTTP function found in executor. Supported: request, http_request, http")
         return false
     end
 
@@ -279,4 +283,39 @@ local function displayHUD()
     local closeBtn = Instance.new("TextButton")
     closeBtn.Name = "CloseBtn"
     closeBtn.Size = UDim2.fromOffset(35, 35)
-    close
+    closeBtn.Position = UDim2.fromScale(1, 0.5)
+    closeBtn.AnchorPoint = Vector2.new(1, 0.5)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.TextScaled = true
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.BorderSizePixel = 0
+    closeBtn.Parent = frame
+
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    btn.Parent = closeBtn
+
+    closeBtn.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+end
+
+-- 8. Execute
+print("=== Blox Fruits Advanced Notifier ===")
+print("Scanning inventory and server info...")
+
+-- Wait to ensure inventory is loaded
+task.wait(2)
+
+local sendSuccess = sendToDiscord()
+
+if sendSuccess then
+    print("✅ Status sent to Discord successfully.")
+else
+    print("❌ Failed to send to Discord. Check console for details.")
+end
+
+-- Show HUD
+displayHUD()
