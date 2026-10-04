@@ -1,16 +1,15 @@
--- Blox Fruits Advanced Discord Notifier
--- Sends Username, Server Info, and Stored Fruits to Discord Webhook
+-- Blox Fruits Advanced Discord Notifier (Fixed & Robust)
 
 -- Configuration
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1552377913238622251/kKXh-i41RJs4J51N233PIYqtirpPRZNhH42mQeljxWuLOzSMV8A0jAEgcEd6HJ3zWsms"
 local PLAYER = game.Players.LocalPlayer
 local PLAYER_NAME = PLAYER.Name
 
--- 1. Get Server Info
+-- 1. Get Server Info (Safe)
 local function getServerInfo()
     local info = {
         id = "Unknown",
-        name = "Unknown",
+        name = "Blox Fruits Server",
         players = 0
     }
     
@@ -19,16 +18,7 @@ local function getServerInfo()
     if pcall(function()
         return runService:GetServerId()
     end) then
-        info.id = runService:GetServerId()
-    end
-
-    -- Get Server Name (If available via GameSettings or workspace attributes)
-    if workspace:GetAttribute("ServerName") then
-        info.name = workspace:GetAttribute("ServerName")
-    elseif game:GetService("GameSettings"):GetAttribute("ServerName") then
-        info.name = game:GetService("GameSettings"):GetAttribute("ServerName")
-    else
-        info.name = "Blox Fruits Server"
+        info.id = tostring(runService:GetServerId())
     end
 
     -- Get Player Count
@@ -37,36 +27,62 @@ local function getServerInfo()
     return info
 end
 
--- 2. Get Stored Fruits Info
+-- 2. Get Stored Fruits Info (Robust)
 local function getStoredFruits()
     local fruits = {}
-    local seen = {} -- To avoid duplicates if fruit is in both backpack and character
+    local seen = {} -- To avoid duplicates
     
     -- Helper to extract fruit data from a tool
     local function processTool(tool)
+        -- Skip if already processed
         if seen[tool.Name] then return end
         seen[tool.Name] = true
         
-        local fruitData = {
-            name = tool.Name,
-            rarity = tool:GetAttribute("Rarity") or tool:GetAttribute("FruitRarity") or "Unknown",
-            quantity = tool:GetAttribute("Quantity") or 1,
-            source = tool.Parent == PLAYER.Backpack and "Backpack" or "Equipped"
-        }
+        -- Extract Data with Fallbacks
+        local name = tool.Name
+        local rarity = "Unknown"
+        local quantity = 1
         
-        -- Some fruits use different attribute names
-        if not fruitData.rarity or fruitData.rarity == "Unknown" then
-            if tool:GetAttribute("Tier") then fruitData.rarity = tool:GetAttribute("Tier") end
-            if tool:GetAttribute("Type") then fruitData.rarity = tool:GetAttribute("Type") end
+        -- Check common attribute names for Rarity
+        local rarityAttrs = {"Rarity", "FruitRarity", "Tier", "Type", "RarityType"}
+        for _, attrName in ipairs(rarityAttrs) do
+            local attrVal = tool:GetAttribute(attrName)
+            if attrVal and attrVal ~= "" then
+                rarity = tostring(attrVal)
+                break
+            end
         end
         
-        table.insert(fruits, fruitData)
+        -- Check for Quantity
+        local qtyAttrs = {"Quantity", "Count", "Amount"}
+        for _, attrName in ipairs(qtyAttrs) do
+            local attrVal = tool:GetAttribute(attrName)
+            if attrVal and type(attrVal) == "number" then
+                quantity = attrVal
+                break
+            end
+        end
+        
+        -- Determine Source
+        local source = "Backpack"
+        if tool.Parent == PLAYER.Character then
+            source = "Equipped"
+        end
+        
+        table.insert(fruits, {
+            name = name,
+            rarity = rarity,
+            quantity = quantity,
+            source = source
+        })
     end
     
     -- Scan Backpack
-    for _, tool in pairs(PLAYER.Backpack:GetChildren()) do
-        if tool:IsA("Tool") then
-            processTool(tool)
+    if PLAYER.Backpack then
+        for _, tool in pairs(PLAYER.Backpack:GetChildren()) do
+            if tool:IsA("Tool") then
+                processTool(tool)
+            end
         end
     end
     
@@ -79,7 +95,7 @@ local function getStoredFruits()
         end
     end
     
-    -- Sort by name for better readability
+    -- Sort by name
     table.sort(fruits, function(a, b)
         return a.name < b.name
     end)
@@ -92,6 +108,7 @@ local function buildPayload()
     local serverInfo = getServerInfo()
     local fruits = getStoredFruits()
     
+    -- Base Fields
     local fields = {
         {
             name = "Server ID",
@@ -110,23 +127,22 @@ local function buildPayload()
         }
     }
     
-    -- Add Fruits to Embed Fields
+    -- Add Fruits
     if #fruits > 0 then
-        local fruitSummary = {}
+        local fruitLines = {}
         for _, fruit in ipairs(fruits) do
-            table.insert(fruitSummary, string.format("**%s** (%s) x%d", fruit.name, fruit.rarity, fruit.quantity))
+            table.insert(fruitLines, string.format("**%s** (%s) x%d", fruit.name, fruit.rarity, fruit.quantity))
         end
         
-        -- Discord embed fields have a 1024 char limit per field
-        -- Group fruits into chunks to avoid overflow
-        local chunkSize = 10
-        for i = 1, #fruitSummary, chunkSize do
+        -- Chunking to respect 1024 char limit per field
+        local chunkSize = 8 
+        for i = 1, #fruitLines, chunkSize do
             local chunk = {}
-            for j = i, math.min(i + chunkSize - 1, #fruitSummary) do
-                table.insert(chunk, fruitSummary[j])
+            for j = i, math.min(i + chunkSize - 1, #fruitLines) do
+                table.insert(chunk, fruitLines[j])
             end
             table.insert(fields, {
-                name = "Fruits (" .. i .. "-" .. math.min(i + chunkSize - 1, #fruitSummary) .. "/" .. #fruits .. ")",
+                name = "Fruits (" .. i .. "-" .. math.min(i + chunkSize - 1, #fruitLines) .. "/" .. #fruitLines .. ")",
                 value = table.concat(chunk, "\n"),
                 inline = false
             })
@@ -175,10 +191,10 @@ local function sendToDiscord()
     end)
 
     if success and response.Success then
-        print("[BF Script] Successfully sent full status to Discord.")
+        print("[BF Script] ✅ Successfully sent full status to Discord.")
         return true
     else
-        print("[BF Script] Failed to send to Discord.")
+        print("[BF Script] ❌ Failed to send to Discord.")
         if not success then
             print("PCall Error: " .. tostring(response))
         else
@@ -282,7 +298,7 @@ print("=== Blox Fruits Advanced Notifier ===")
 print("Scanning inventory and server info...")
 
 -- Wait a moment to ensure inventory is loaded
-wait(2)
+task.wait(2)
 
 local sendSuccess = sendToDiscord()
 local clipStatus = copyToClipboard(PLAYER_NAME)
