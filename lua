@@ -1,4 +1,4 @@
--- Blox Fruits Advanced Discord Notifier (Formatted)
+-- Blox Fruits Advanced Discord Notifier (Formatted & Robust)
 
 -- Configuration
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1552377913238622251/kKXh-i41RJs4J51N233PIYqtirpPRZNhH42mQeljxWuLOzSMV8A0jAEgcEd6HJ3zWsms"
@@ -53,36 +53,20 @@ local function getRarity(tool)
         end
     end
     
-    -- 2. Fallback: Hardcoded list for common fruits if attributes fail
+    -- 2. Fallback: Heuristic based on common fruit names
     local fruitName = tool.Name:lower()
     
-    local mythicals = {
-        "dough", "dragon", "venom", "blizzard", "t-rex", "portal", "control", 
-        "leviathan", "spirit", "dark", "yeti", "mammoth", "pernida", "robin", 
-        "raider", "shark", "bombardier", "spirit", "dark", "yeti", "mammoth", "pernida", "robin"
-    }
-    local legendaries = {
-        "magma", "ghost", "diamond", "ice", "flame", "smoke", "blade", "light", 
-        "quake", "rubber", "spin", "spider", "sound", "sand", "gravity", "buddha", 
-        "phoenix", "lion", "bird", "leviathan", "spirit", "dark", "yeti", "mammoth", "pernida", "robin"
-    }
-    local rares = {
-        "ghost", "magma", "ice", "flame", "smoke", "blade", "light", "quake", 
-        "rubber", "spin", "spider", "sound", "sand", "gravity", "buddha", "phoenix", 
-        "lion", "bird", "leviathan", "spirit", "dark", "yeti", "mammoth", "pernida", "robin"
-    }
-    local uncommons = {
-        "smoke", "blade", "light", "quake", "rubber", "spin", "spider", "sound", 
-        "sand", "gravity", "buddha", "phoenix", "lion", "bird", "leviathan", "spirit", 
-        "dark", "yeti", "mammoth", "pernida", "robin"
-    }
-    local commons = {
-        "smoke", "blade", "light", "quake", "rubber", "spin", "spider", "sound", 
-        "sand", "gravity", "buddha", "phoenix", "lion", "bird", "leviathan", "spirit", 
-        "dark", "yeti", "mammoth", "pernida", "robin"
-    }
+    -- Mythical
+    local mythicals = {"dough", "dragon", "venom", "blizzard", "t-rex", "portal", "control", "leviathan", "spirit", "dark", "yeti", "mammoth", "pernida", "robin", "raider", "shark", "bombardier"}
+    -- Legendary
+    local legendaries = {"magma", "ghost", "diamond", "ice", "flame", "smoke", "blade", "light", "quake", "rubber", "spin", "spider", "sound", "sand", "gravity", "buddha", "phoenix", "lion", "bird"}
+    -- Rare
+    local rares = {"ghost", "magma", "ice", "flame", "smoke", "blade", "light", "quake", "rubber", "spin", "spider", "sound", "sand", "gravity", "buddha", "phoenix", "lion", "bird"}
+    -- Uncommon
+    local uncommons = {"smoke", "blade", "light", "quake", "rubber", "spin", "spider", "sound", "sand", "gravity", "buddha", "phoenix", "lion", "bird"}
+    -- Common
+    local commons = {"smoke", "blade", "light", "quake", "rubber", "spin", "spider", "sound", "sand", "gravity", "buddha", "phoenix", "lion", "bird"}
     
-    -- Simple check based on known high-tier fruits
     if table.find(mythicals, fruitName) then return "Mythical" end
     if table.find(legendaries, fruitName) then return "Legendary" end
     if table.find(rares, fruitName) then return "Rare" end
@@ -188,7 +172,44 @@ local function buildContent()
     return table.concat(lines, "\n")
 end
 
--- 6. Send to Discord
+-- 6. Robust HTTP Request Function
+local function makeRequest(url, method, headers, body)
+    -- Try 'request' (Newer)
+    if request then
+        return pcall(function()
+            return request({
+                Url = url,
+                Method = method,
+                Headers = headers,
+                Body = body
+            })
+        end)
+    -- Try 'http_request' (Older Standard)
+    elseif http_request then
+        return pcall(function()
+            return http_request({
+                Url = url,
+                Method = method,
+                Headers = headers,
+                Body = body
+            })
+        end)
+    -- Try 'http' (Legacy)
+    elseif http then
+        return pcall(function()
+            return http({
+                Url = url,
+                Method = method,
+                Headers = headers,
+                Body = body
+            })
+        end)
+    else
+        error("No HTTP function available in this executor.")
+    end
+end
+
+-- 7. Send to Discord
 local function sendToDiscord()
     local content = buildContent()
     
@@ -201,33 +222,29 @@ local function sendToDiscord()
     local httpService = game:GetService("HttpService")
     local encodedPayload = httpService:JSONEncode(payload)
 
-    local success, response = pcall(function()
-        return request({
-            Url = WEBHOOK_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = encodedPayload
-        })
-    end)
+    local success, result = makeRequest(
+        WEBHOOK_URL, 
+        "POST", 
+        { ["Content-Type"] = "application/json" }, 
+        encodedPayload
+    )
 
-    if success and response.Success then
+    if success and result.Success then
         print("[BF Script] ✅ Successfully sent formatted status to Discord.")
         return true
     else
         print("[BF Script] ❌ Failed to send to Discord.")
         if not success then
-            print("PCall Error: " .. tostring(response))
+            print("PCall Error: " .. tostring(result))
         else
-            print("Response Status: " .. tostring(response.StatusCode))
-            print("Response Body: " .. tostring(response.Body))
+            print("Response Status: " .. tostring(result.StatusCode))
+            print("Response Body: " .. tostring(result.Body))
         end
         return false
     end
 end
 
--- 7. HUD Display
+-- 8. HUD Display
 local function displayHUD()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "BF_AdvancedHUD"
@@ -286,4 +303,7 @@ local function displayHUD()
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeBtn.Text = "X"
     closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.TextScaled = true
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.BorderSizePixel = 0
     close
