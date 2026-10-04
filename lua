@@ -9,11 +9,12 @@ local WEBHOOK_URL = "https://discord.com/api/webhooks/1552377913238622251/kKXh-i
 local PLAYER = game.Players.LocalPlayer
 local PLAYER_NAME = PLAYER.Name
 
--- 1. Helper: Get Account Age
+-- 1. Helper: Get Account Age (Fixed)
 local function getAccountAge()
     local created = PLAYER.Created
+    local createdUnix = created.UnixTimestamp
     local now = os.time()
-    local seconds = now - os.time(created)
+    local seconds = now - createdUnix
     local days = math.floor(seconds / 86400)
     local hours = math.floor((seconds % 86400) / 3600)
     local minutes = math.floor((seconds % 3600) / 60)
@@ -26,7 +27,6 @@ local function getAccountAge()
         return minutes .. " minutes"
     end
 end
-
 -- 2. Helper: Get Sea Level
 local function getSeaLevel()
     local char = PLAYER.Character
